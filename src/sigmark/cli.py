@@ -80,3 +80,22 @@ def verify(ctx: click.Context, gpg_home: Path | None, paths: tuple[Path, ...]) -
             all_valid = False
     if not all_valid:
         raise SystemExit(1)
+
+
+@main.command()
+@click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))
+@click.pass_context
+def strip(ctx: click.Context, paths: tuple[Path, ...]) -> None:
+    """Remove GPG signatures from markdown files."""
+    dry_run = ctx.obj["dry_run"]
+    files = markdown.resolve_paths(list(paths))
+    for md_file in files:
+        fm, body = markdown.parse(md_file.read_text())
+        if "signature" not in fm:
+            continue
+        del fm["signature"]
+        if dry_run:
+            console.print(f"[yellow]Would strip:[/yellow] {md_file}")
+        else:
+            md_file.write_text(markdown.render(fm, body))
+            console.print(f"[green]Stripped:[/green] {md_file}")

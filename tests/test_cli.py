@@ -77,3 +77,35 @@ class TestVerifyCommand:
             str(tmp_content / "post" / "hello-world" / "index.md"),
         ])
         assert result.exit_code == 1
+
+
+class TestStripCommand:
+    def test_strip_removes_signature(self, tmp_content, gpg_home):
+        md_file = tmp_content / "post" / "hello-world" / "index.md"
+        fm, body = parse(md_file.read_text())
+        fm["signature"] = "fake-sig"
+        md_file.write_text(markdown.render(fm, body))
+        runner = CliRunner()
+        result = runner.invoke(main, ["strip", str(md_file)])
+        assert result.exit_code == 0
+        fm2, _ = parse(md_file.read_text())
+        assert "signature" not in fm2
+
+    def test_strip_dry_run(self, tmp_content):
+        md_file = tmp_content / "post" / "hello-world" / "index.md"
+        fm, body = parse(md_file.read_text())
+        fm["signature"] = "fake-sig"
+        md_file.write_text(markdown.render(fm, body))
+        original = md_file.read_text()
+        runner = CliRunner()
+        result = runner.invoke(main, ["--dry-run", "strip", str(md_file)])
+        assert result.exit_code == 0
+        assert md_file.read_text() == original
+
+    def test_strip_unsigned_file_is_noop(self, tmp_content):
+        md_file = tmp_content / "post" / "hello-world" / "index.md"
+        original = md_file.read_text()
+        runner = CliRunner()
+        result = runner.invoke(main, ["strip", str(md_file)])
+        assert result.exit_code == 0
+        assert md_file.read_text() == original
