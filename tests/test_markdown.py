@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from sigmark.markdown import parse
+from sigmark.markdown import parse, render
 
 
 class TestParse:
@@ -38,3 +38,32 @@ class TestParse:
         fm, body = parse(text)
         assert fm["signature"] == "old-sig"
         assert body == "Body.\n"
+
+
+class TestRender:
+    def test_basic_render(self):
+        result = render({"title": "Hello", "date": "2026-01-01"}, "Body.\n")
+        fm, body = parse(result)
+        assert fm == {"title": "Hello", "date": "2026-01-01"}
+        assert body == "Body.\n"
+
+    def test_roundtrip(self):
+        original = "---\ntitle: Hello\ntags:\n  - a\n  - b\n---\nBody text.\n"
+        fm, body = parse(original)
+        result = render(fm, body)
+        fm2, body2 = parse(result)
+        assert fm2 == fm
+        assert body2 == body
+
+    def test_empty_front_matter(self):
+        result = render({}, "Body.\n")
+        fm, body = parse(result)
+        assert fm == {}
+        assert body == "Body.\n"
+
+    def test_render_with_signature(self):
+        fm = {"title": "Hello", "signature": "ABC123"}
+        result = render(fm, "Body.\n")
+        assert "signature:" in result
+        fm2, body2 = parse(result)
+        assert fm2["signature"] == "ABC123"

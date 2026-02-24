@@ -30,3 +30,12 @@ def parse(text: str) -> tuple[dict, str]:
     fm_raw, body = match.group(1), match.group(2)
     front_matter = yaml.load(fm_raw, Loader=_StringDateLoader) or {}
     return front_matter, body
+
+
+def render(front_matter: dict, body: str) -> str:
+    """Reassemble front matter dict and body into a markdown string."""
+    if front_matter:
+        fm_str = yaml.dump(front_matter, default_flow_style=False, sort_keys=False)
+    else:
+        fm_str = ""
+    return f"---\n{fm_str}---\n{body}"
