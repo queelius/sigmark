@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from sigmark.gpg import sign
+from sigmark.gpg import sign, verify
 
 
 class TestSign:
@@ -20,3 +20,23 @@ class TestSign:
     def test_bad_key_raises(self, gpg_home):
         with pytest.raises(RuntimeError, match="GPG sign failed"):
             sign("Hello.\n", key="nonexistent@example.com", gpg_home=gpg_home)
+
+
+class TestVerify:
+    def test_valid_signature(self, gpg_home):
+        body = "Hello world.\n"
+        sig = sign(body, key="test@example.com", gpg_home=gpg_home)
+        result = verify(body, sig, gpg_home=gpg_home)
+        assert result.valid is True
+        assert result.key_id is not None
+        assert result.error is None
+
+    def test_tampered_body_fails(self, gpg_home):
+        sig = sign("Original.\n", key="test@example.com", gpg_home=gpg_home)
+        result = verify("Tampered.\n", sig, gpg_home=gpg_home)
+        assert result.valid is False
+        assert result.error is not None
+
+    def test_garbage_signature_fails(self, gpg_home):
+        result = verify("Hello.\n", "not-a-signature", gpg_home=gpg_home)
+        assert result.valid is False
