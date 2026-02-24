@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import yaml
 
@@ -39,3 +40,27 @@ def render(front_matter: dict, body: str) -> str:
     else:
         fm_str = ""
     return f"---\n{fm_str}---\n{body}"
+
+
+def resolve_paths(paths: list[Path]) -> list[Path]:
+    """Expand files and directories into a list of .md files with front matter.
+
+    Directories are walked recursively. Individual files are validated
+    to have front matter. Raises FileNotFoundError for missing paths
+    and ValueError for files without front matter.
+    """
+    result: list[Path] = []
+    for path in paths:
+        if not path.exists():
+            raise FileNotFoundError(f"Path not found: {path}")
+        if path.is_file():
+            parse(path.read_text())
+            result.append(path)
+        elif path.is_dir():
+            for md_file in sorted(path.rglob("*.md")):
+                try:
+                    parse(md_file.read_text())
+                    result.append(md_file)
+                except ValueError:
+                    continue
+    return result

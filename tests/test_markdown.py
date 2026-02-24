@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from sigmark.markdown import parse, render
+from sigmark.markdown import parse, render, resolve_paths
 
 
 class TestParse:
@@ -67,3 +67,30 @@ class TestRender:
         assert "signature:" in result
         fm2, body2 = parse(result)
         assert fm2["signature"] == "ABC123"
+
+
+class TestResolvePaths:
+    def test_directory_finds_md_with_front_matter(self, tmp_content):
+        paths = resolve_paths([tmp_content])
+        filenames = {p.name for p in paths}
+        assert "index.md" in filenames
+        # README.md has no front matter, should be excluded
+        assert all("README" not in str(p) for p in paths)
+
+    def test_single_file(self, tmp_content):
+        md_file = tmp_content / "post" / "hello-world" / "index.md"
+        paths = resolve_paths([md_file])
+        assert paths == [md_file]
+
+    def test_mixed_files_and_dirs(self, tmp_content):
+        single = tmp_content / "post" / "hello-world" / "index.md"
+        paths = resolve_paths([single, tmp_content / "post" / "second-post"])
+        assert len(paths) == 2
+
+    def test_nonexistent_path_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            resolve_paths([tmp_path / "nope.md"])
+
+    def test_file_without_front_matter_raises(self, tmp_content):
+        with pytest.raises(ValueError, match="No YAML front matter"):
+            resolve_paths([tmp_content / "README.md"])
