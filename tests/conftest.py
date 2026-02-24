@@ -1,9 +1,9 @@
 """Shared test fixtures for sigmark."""
+
 from __future__ import annotations
 
 import os
 import subprocess
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -45,6 +45,8 @@ def gpg_home(tmp_path: Path) -> Path:
     env = {**os.environ, "GNUPGHOME": str(gnupg_dir)}
     subprocess.run(
         ["gpg", "--batch", "--gen-key", str(key_params)],
-        env=env, capture_output=True, check=True,
+        env=env,
+        capture_output=True,
+        check=True,
     )
     return gnupg_dir

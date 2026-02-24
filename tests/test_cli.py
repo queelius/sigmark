@@ -1,4 +1,5 @@
 """Tests for sigmark CLI subcommands."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -13,11 +14,17 @@ from sigmark.markdown import parse
 class TestSignCommand:
     def test_sign_adds_signature_to_front_matter(self, tmp_content, gpg_home):
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "sign", "--key", "test@example.com",
-            "--gpg-home", str(gpg_home),
-            str(tmp_content / "post"),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "sign",
+                "--key",
+                "test@example.com",
+                "--gpg-home",
+                str(gpg_home),
+                str(tmp_content / "post"),
+            ],
+        )
         assert result.exit_code == 0
         text = (tmp_content / "post" / "hello-world" / "index.md").read_text()
         fm, body = parse(text)
@@ -27,11 +34,18 @@ class TestSignCommand:
     def test_sign_dry_run_does_not_modify(self, tmp_content, gpg_home):
         original = (tmp_content / "post" / "hello-world" / "index.md").read_text()
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "--dry-run", "sign", "--key", "test@example.com",
-            "--gpg-home", str(gpg_home),
-            str(tmp_content / "post"),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "--dry-run",
+                "sign",
+                "--key",
+                "test@example.com",
+                "--gpg-home",
+                str(gpg_home),
+                str(tmp_content / "post"),
+            ],
+        )
         assert result.exit_code == 0
         assert (tmp_content / "post" / "hello-world" / "index.md").read_text() == original
 
@@ -53,9 +67,15 @@ class TestVerifyCommand:
         md_file = tmp_content / "post" / "hello-world" / "index.md"
         self._sign_file(md_file, gpg_home)
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "verify", "--gpg-home", str(gpg_home), str(md_file),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "verify",
+                "--gpg-home",
+                str(gpg_home),
+                str(md_file),
+            ],
+        )
         assert result.exit_code == 0
 
     def test_verify_tampered_file_fails(self, tmp_content, gpg_home):
@@ -65,17 +85,28 @@ class TestVerifyCommand:
         fm, _ = parse(md_file.read_text())
         md_file.write_text(markdown.render(fm, "Tampered body.\n"))
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "verify", "--gpg-home", str(gpg_home), str(md_file),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "verify",
+                "--gpg-home",
+                str(gpg_home),
+                str(md_file),
+            ],
+        )
         assert result.exit_code == 1
 
     def test_verify_unsigned_file_fails(self, tmp_content, gpg_home):
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "verify", "--gpg-home", str(gpg_home),
-            str(tmp_content / "post" / "hello-world" / "index.md"),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "verify",
+                "--gpg-home",
+                str(gpg_home),
+                str(tmp_content / "post" / "hello-world" / "index.md"),
+            ],
+        )
         assert result.exit_code == 1
 
 
@@ -124,9 +155,15 @@ class TestStatusCommand:
         fm["signature"] = gpg.sign(body, key="test@example.com", gpg_home=gpg_home)
         md_file.write_text(markdown.render(fm, body))
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "status", "--gpg-home", str(gpg_home), str(md_file),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "status",
+                "--gpg-home",
+                str(gpg_home),
+                str(md_file),
+            ],
+        )
         assert result.exit_code == 0
         assert "valid" in result.output.lower()
 
@@ -136,8 +173,14 @@ class TestStatusCommand:
         fm["signature"] = "bogus-signature"
         md_file.write_text(markdown.render(fm, body))
         runner = CliRunner()
-        result = runner.invoke(main, [
-            "status", "--gpg-home", str(gpg_home), str(md_file),
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "status",
+                "--gpg-home",
+                str(gpg_home),
+                str(md_file),
+            ],
+        )
         assert result.exit_code == 0
         assert "invalid" in result.output.lower()

@@ -1,4 +1,5 @@
 """sigmark CLI entry point."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -27,12 +28,12 @@ def main(ctx: click.Context, verbose: bool, dry_run: bool) -> None:
 @click.option("--key", required=True, help="GPG key ID or email for signing")
 @click.option(
     "--gpg-home",
-    type=click.Path(exists=True, path_type=Path),
+    type=click.Path(exists=True, path_type=Path),  # type: ignore[type-var]
     default=None,
     hidden=True,
     help="Custom GPG home directory (for testing)",
 )
-@click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))
+@click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))  # type: ignore[type-var]
 @click.pass_context
 def sign(ctx: click.Context, key: str, gpg_home: Path | None, paths: tuple[Path, ...]) -> None:
     """Sign markdown files with GPG."""
@@ -52,11 +53,11 @@ def sign(ctx: click.Context, key: str, gpg_home: Path | None, paths: tuple[Path,
 @main.command()
 @click.option(
     "--gpg-home",
-    type=click.Path(exists=True, path_type=Path),
+    type=click.Path(exists=True, path_type=Path),  # type: ignore[type-var]
     default=None,
     hidden=True,
 )
-@click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))
+@click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))  # type: ignore[type-var]
 @click.pass_context
 def verify(ctx: click.Context, gpg_home: Path | None, paths: tuple[Path, ...]) -> None:
     """Verify GPG signatures on markdown files."""
@@ -83,7 +84,7 @@ def verify(ctx: click.Context, gpg_home: Path | None, paths: tuple[Path, ...]) -
 
 
 @main.command()
-@click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))
+@click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))  # type: ignore[type-var]
 @click.pass_context
 def strip(ctx: click.Context, paths: tuple[Path, ...]) -> None:
     """Remove GPG signatures from markdown files."""
@@ -104,11 +105,11 @@ def strip(ctx: click.Context, paths: tuple[Path, ...]) -> None:
 @main.command()
 @click.option(
     "--gpg-home",
-    type=click.Path(exists=True, path_type=Path),
+    type=click.Path(exists=True, path_type=Path),  # type: ignore[type-var]
     default=None,
     hidden=True,
 )
-@click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))
+@click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))  # type: ignore[type-var]
 @click.pass_context
 def status(ctx: click.Context, gpg_home: Path | None, paths: tuple[Path, ...]) -> None:
     """Report signing status of markdown files."""

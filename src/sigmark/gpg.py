@@ -1,4 +1,5 @@
 """GPG signing and verification via subprocess."""
+
 from __future__ import annotations
 
 import os

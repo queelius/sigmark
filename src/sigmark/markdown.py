@@ -1,4 +1,5 @@
 """Markdown front matter parsing and rendering."""
+
 from __future__ import annotations
 
 import re

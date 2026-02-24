@@ -1,4 +1,5 @@
 """Tests for sigmark.gpg module."""
+
 from __future__ import annotations
 
 import pytest
