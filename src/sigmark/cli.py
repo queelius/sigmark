@@ -99,3 +99,28 @@ def strip(ctx: click.Context, paths: tuple[Path, ...]) -> None:
         else:
             md_file.write_text(markdown.render(fm, body))
             console.print(f"[green]Stripped:[/green] {md_file}")
+
+
+@main.command()
+@click.option(
+    "--gpg-home",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    hidden=True,
+)
+@click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))
+@click.pass_context
+def status(ctx: click.Context, gpg_home: Path | None, paths: tuple[Path, ...]) -> None:
+    """Report signing status of markdown files."""
+    files = markdown.resolve_paths(list(paths))
+    for md_file in files:
+        fm, body = markdown.parse(md_file.read_text())
+        sig = fm.get("signature")
+        if not sig:
+            console.print(f"[dim]Unsigned:[/dim] {md_file}")
+            continue
+        result = gpg.verify(body, sig, gpg_home=gpg_home)
+        if result.valid:
+            console.print(f"[green]Valid:[/green] {md_file}")
+        else:
+            console.print(f"[red]Invalid:[/red] {md_file}")

@@ -109,3 +109,35 @@ class TestStripCommand:
         result = runner.invoke(main, ["strip", str(md_file)])
         assert result.exit_code == 0
         assert md_file.read_text() == original
+
+
+class TestStatusCommand:
+    def test_status_shows_unsigned(self, tmp_content):
+        runner = CliRunner()
+        result = runner.invoke(main, ["status", str(tmp_content / "post")])
+        assert result.exit_code == 0
+        assert "unsigned" in result.output.lower()
+
+    def test_status_shows_valid(self, tmp_content, gpg_home):
+        md_file = tmp_content / "post" / "hello-world" / "index.md"
+        fm, body = parse(md_file.read_text())
+        fm["signature"] = gpg.sign(body, key="test@example.com", gpg_home=gpg_home)
+        md_file.write_text(markdown.render(fm, body))
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "status", "--gpg-home", str(gpg_home), str(md_file),
+        ])
+        assert result.exit_code == 0
+        assert "valid" in result.output.lower()
+
+    def test_status_shows_invalid(self, tmp_content, gpg_home):
+        md_file = tmp_content / "post" / "hello-world" / "index.md"
+        fm, body = parse(md_file.read_text())
+        fm["signature"] = "bogus-signature"
+        md_file.write_text(markdown.render(fm, body))
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "status", "--gpg-home", str(gpg_home), str(md_file),
+        ])
+        assert result.exit_code == 0
+        assert "invalid" in result.output.lower()
