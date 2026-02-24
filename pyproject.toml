@@ -45,6 +45,7 @@ sigmark = "sigmark.cli:main"
 
 [project.urls]
 Repository = "https://github.com/queelius/sigmark"
+Issues = "https://github.com/queelius/sigmark/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sigmark"]
