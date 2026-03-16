@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,7 +12,7 @@ from rich.console import Console
 
 from sigmark import __version__, gpg, markdown
 
-console = Console()
+console = Console(stderr=True)
 
 
 @click.group()
@@ -55,8 +56,7 @@ def sign(
     errors = 0
     for md_file in files:
         try:
-            fm, body = markdown.parse(md_file.read_text())
-            normalized = markdown.normalize_body(body)
+            fm, body = markdown.parse(md_file.read_text(encoding="utf-8"))
             current_hash = markdown.compute_body_hash(body)
 
             # Skip if already signed with current hash, unless --force
@@ -69,17 +69,19 @@ def sign(
                 signed += 1
                 continue
 
-            sig = gpg.sign(normalized, key=key, gpg_home=gpg_home)
+            sig = gpg.sign(markdown.normalize_body(body), key=key, gpg_home=gpg_home)
             fm["gpg_sig"] = sig
             fm["gpg_sig_date"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             fm["gpg_body_hash"] = current_hash
-            md_file.write_text(markdown.render(fm, body))
+            md_file.write_text(markdown.render(fm, body), encoding="utf-8")
             console.print(f"[green]Signed:[/green] {md_file}")
             signed += 1
         except Exception as exc:
             errors += 1
             console.print(f"[red]Error:[/red] {md_file}: {exc}")
     console.print(f"Signed {signed}, skipped {skipped}, errors {errors}")
+    if errors and not signed:
+        raise SystemExit(1)
 
 
 @main.command()
@@ -97,17 +99,19 @@ def verify(ctx: click.Context, gpg_home: Path | None, paths: tuple[Path, ...]) -
     if not paths:
         paths = (Path("."),)
     files = markdown.resolve_paths(list(paths))
+    if not files:
+        console.print("[red]No markdown files found[/red]")
+        raise SystemExit(1)
     all_valid = True
     for md_file in files:
         try:
-            fm, body = markdown.parse(md_file.read_text())
+            fm, body = markdown.parse(md_file.read_text(encoding="utf-8"))
             sig = fm.get("gpg_sig")
             if not sig:
                 console.print(f"[red]Unsigned:[/red] {md_file}")
                 all_valid = False
                 continue
-            normalized = markdown.normalize_body(body)
-            result = gpg.verify(normalized, sig, gpg_home=gpg_home)
+            result = gpg.verify(markdown.normalize_body(body), sig, gpg_home=gpg_home)
             if result.valid:
                 console.print(f"[green]Valid:[/green] {md_file}")
             else:
@@ -133,7 +137,7 @@ def strip(ctx: click.Context, paths: tuple[Path, ...]) -> None:
     files = markdown.resolve_paths(list(paths))
     sig_fields = ("gpg_sig", "gpg_sig_date", "gpg_body_hash")
     for md_file in files:
-        fm, body = markdown.parse(md_file.read_text())
+        fm, body = markdown.parse(md_file.read_text(encoding="utf-8"))
         if not any(f in fm for f in sig_fields):
             continue
         for field in sig_fields:
@@ -141,8 +145,27 @@ def strip(ctx: click.Context, paths: tuple[Path, ...]) -> None:
         if dry_run:
             console.print(f"[yellow]Would strip:[/yellow] {md_file}")
         else:
-            md_file.write_text(markdown.render(fm, body))
+            md_file.write_text(markdown.render(fm, body), encoding="utf-8")
             console.print(f"[green]Stripped:[/green] {md_file}")
+
+
+def _classify_file(md_file: Path, gpg_home: Path | None) -> str:
+    """Determine the signing status of a single markdown file.
+
+    Returns one of: "unsigned", "stale", "signed", "invalid".
+    """
+    fm, body = markdown.parse(md_file.read_text(encoding="utf-8"))
+    sig = fm.get("gpg_sig")
+    if not sig:
+        return "unsigned"
+
+    current_hash = markdown.compute_body_hash(body)
+    stored_hash = fm.get("gpg_body_hash")
+    if stored_hash and stored_hash != current_hash:
+        return "stale"
+
+    result = gpg.verify(markdown.normalize_body(body), sig, gpg_home=gpg_home)
+    return "signed" if result.valid else "invalid"
 
 
 @main.command()
@@ -168,42 +191,20 @@ def status(
     file_statuses: list[dict] = []
     for md_file in files:
         try:
-            fm, body = markdown.parse(md_file.read_text())
-            sig = fm.get("gpg_sig")
-            if not sig:
-                file_statuses.append({"path": str(md_file), "status": "unsigned"})
-                continue
-
-            # Check for stale hash
-            current_hash = markdown.compute_body_hash(body)
-            stored_hash = fm.get("gpg_body_hash")
-            if stored_hash and stored_hash != current_hash:
-                file_statuses.append({"path": str(md_file), "status": "stale"})
-                continue
-
-            result = gpg.verify(
-                markdown.normalize_body(body), sig, gpg_home=gpg_home
-            )
-            if result.valid:
-                file_statuses.append({"path": str(md_file), "status": "signed"})
-            else:
-                file_statuses.append({"path": str(md_file), "status": "invalid"})
+            file_status = _classify_file(md_file, gpg_home)
         except Exception as exc:
             console.print(f"[red]Error:[/red] {md_file}: {exc}")
-            file_statuses.append({"path": str(md_file), "status": "error"})
+            file_status = "error"
+        file_statuses.append({"path": str(md_file), "status": file_status})
 
     if use_json:
-        total = len(file_statuses)
-        signed = sum(1 for f in file_statuses if f["status"] == "signed")
-        unsigned = sum(1 for f in file_statuses if f["status"] == "unsigned")
-        stale = sum(1 for f in file_statuses if f["status"] == "stale")
-        invalid = sum(1 for f in file_statuses if f["status"] == "invalid")
+        counts = Counter(f["status"] for f in file_statuses)
         report = {
-            "total": total,
-            "signed": signed,
-            "unsigned": unsigned,
-            "stale": stale,
-            "invalid": invalid,
+            "total": len(file_statuses),
+            "signed": counts.get("signed", 0),
+            "unsigned": counts.get("unsigned", 0),
+            "stale": counts.get("stale", 0),
+            "invalid": counts.get("invalid", 0),
             "files": file_statuses,
         }
         click.echo(json.dumps(report, indent=2))

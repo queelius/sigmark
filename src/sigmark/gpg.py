@@ -17,9 +17,8 @@ def sign(body: str, key: str | None = None, gpg_home: Path | None = None) -> str
     Raises RuntimeError if GPG fails.
     """
     env = _gpg_env(gpg_home)
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
         f.write(body)
-        f.flush()
         body_path = f.name
     try:
         cmd = [
@@ -42,7 +41,7 @@ def sign(body: str, key: str | None = None, gpg_home: Path | None = None) -> str
         if result.returncode != 0:
             raise RuntimeError(f"GPG sign failed: {result.stderr.strip()}")
         sig_path = Path(body_path + ".asc")
-        return sig_path.read_text()
+        return sig_path.read_text(encoding="utf-8")
     finally:
         Path(body_path).unlink(missing_ok=True)
         Path(body_path + ".asc").unlink(missing_ok=True)
@@ -60,13 +59,11 @@ class VerifyResult:
 def verify(body: str, signature: str, gpg_home: Path | None = None) -> VerifyResult:
     """Verify a detached GPG signature against body text."""
     env = _gpg_env(gpg_home)
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as bf:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as bf:
         bf.write(body)
-        bf.flush()
         body_path = bf.name
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".sig", delete=False) as sf:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".sig", delete=False, encoding="utf-8") as sf:
         sf.write(signature)
-        sf.flush()
         sig_path = sf.name
     try:
         result = subprocess.run(

@@ -418,3 +418,27 @@ class TestStripAllFields:
         assert result.exit_code == 0
         fm2, _ = parse(md_file.read_text())
         assert "gpg_body_hash" not in fm2
+
+
+class TestVerifyNoFiles:
+    def test_verify_no_files_exits_nonzero(self, tmp_path):
+        """verify should exit 1 when no markdown files are found."""
+        empty_dir = tmp_path / "empty"
+        empty_dir.mkdir()
+        runner = CliRunner()
+        result = runner.invoke(main, ["verify", str(empty_dir)])
+        assert result.exit_code == 1
+        assert "no markdown files found" in result.output.lower()
+
+
+class TestSignAllErrors:
+    def test_sign_all_errors_exits_nonzero(self, tmp_path):
+        """sign should exit 1 when all files error and none are signed."""
+        md_file = tmp_path / "test.md"
+        md_file.write_text("---\ntitle: Test\n---\nBody.\n")
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["sign", "--key", "nonexistent-key@nowhere.invalid", str(md_file)],
+        )
+        assert result.exit_code == 1

@@ -3,21 +3,30 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import re
 from pathlib import Path
 
-import yaml
+from ruamel.yaml import YAML
 
+_yaml = YAML()
+_yaml.preserve_quotes = True
+_yaml.indent(mapping=2, sequence=4, offset=2)
 
-class _StringDateLoader(yaml.SafeLoader):
-    """YAML loader that keeps date-like scalars as strings."""
-
-
-# Remove the implicit date resolver so dates stay as plain strings.
-_StringDateLoader.yaml_implicit_resolvers = {
-    k: [(tag, regexp) for tag, regexp in v if tag != "tag:yaml.org,2002:timestamp"]
-    for k, v in yaml.SafeLoader.yaml_implicit_resolvers.copy().items()
-}
+# Remove the implicit timestamp resolver so dates stay as plain strings,
+# preventing round-trip corruption (e.g. 2026-01-01 -> '2026-01-01').
+_TIMESTAMP_TAG = "tag:yaml.org,2002:timestamp"
+for _version, _resolvers in _yaml.resolver._version_implicit_resolver.items():
+    for _key in list(_resolvers):
+        _resolvers[_key] = [
+            (tag, regexp) for tag, regexp in _resolvers[_key] if tag != _TIMESTAMP_TAG
+        ]
+for _key in list(_yaml.resolver.versioned_resolver):
+    _yaml.resolver.versioned_resolver[_key] = [
+        (tag, regexp)
+        for tag, regexp in _yaml.resolver.versioned_resolver[_key]
+        if tag != _TIMESTAMP_TAG
+    ]
 
 
 def parse(text: str) -> tuple[dict, str]:
@@ -33,14 +42,16 @@ def parse(text: str) -> tuple[dict, str]:
     if not match:
         raise ValueError("No YAML front matter found")
     fm_raw, body = match.group(1), match.group(2)
-    front_matter = yaml.load(fm_raw, Loader=_StringDateLoader) or {}
+    front_matter = _yaml.load(fm_raw) or {}
     return front_matter, body
 
 
 def render(front_matter: dict, body: str) -> str:
     """Reassemble front matter dict and body into a markdown string."""
     if front_matter:
-        fm_str = yaml.dump(front_matter, default_flow_style=False, sort_keys=False)
+        buf = io.StringIO()
+        _yaml.dump(front_matter, buf)
+        fm_str = buf.getvalue()
     else:
         fm_str = ""
     return f"---\n{fm_str}---\n{body}"
@@ -53,8 +64,7 @@ def normalize_body(body: str) -> str:
     """
     if not body or body.isspace():
         return ""
-    lines = body.rstrip("\n").split("\n")
-    lines = [line.rstrip() for line in lines]
+    lines = [line.rstrip() for line in body.rstrip("\n").split("\n")]
     return "\n".join(lines) + "\n"
 
 
@@ -80,12 +90,12 @@ def resolve_paths(paths: list[Path]) -> list[Path]:
         if not path.exists():
             raise FileNotFoundError(f"Path not found: {path}")
         if path.is_file():
-            parse(path.read_text())
+            parse(path.read_text(encoding="utf-8"))
             result.append(path)
         elif path.is_dir():
             for md_file in sorted(path.rglob("*.md")):
                 try:
-                    parse(md_file.read_text())
+                    parse(md_file.read_text(encoding="utf-8"))
                     result.append(md_file)
                 except ValueError:
                     continue

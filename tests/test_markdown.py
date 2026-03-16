@@ -56,6 +56,13 @@ class TestRender:
         assert fm2 == fm
         assert body2 == body
 
+    def test_roundtrip_preserves_formatting(self):
+        """parse/render round-trip must not alter YAML formatting."""
+        original = "---\ntitle: Hello World\ndate: 2026-01-01\ntags:\n  - test\n  - demo\n---\nBody text.\n"
+        fm, body = parse(original)
+        result = render(fm, body)
+        assert result == original
+
     def test_empty_front_matter(self):
         result = render({}, "Body.\n")
         fm, body = parse(result)
