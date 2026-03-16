@@ -11,6 +11,7 @@ from ruamel.yaml import YAML
 
 _yaml = YAML()
 _yaml.preserve_quotes = True
+_yaml.width = 4096  # Prevent line wrapping of long scalar values
 _yaml.indent(mapping=2, sequence=4, offset=2)
 
 # Remove the implicit timestamp resolver so dates stay as plain strings,
