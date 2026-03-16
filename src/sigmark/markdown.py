@@ -27,6 +27,8 @@ def parse(text: str) -> tuple[dict, str]:
     Body is everything after the closing delimiter.
     Raises ValueError if no front matter is found.
     """
+    # Normalize CRLF to LF for cross-platform compatibility
+    text = text.replace("\r\n", "\n")
     match = re.match(r"\A---\n(.*?)^---\n(.*)\Z", text, re.DOTALL | re.MULTILINE)
     if not match:
         raise ValueError("No YAML front matter found")

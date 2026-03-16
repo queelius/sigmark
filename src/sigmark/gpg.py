@@ -37,6 +37,7 @@ def sign(body: str, key: str | None = None, gpg_home: Path | None = None) -> str
             env=env,
             capture_output=True,
             text=True,
+            timeout=30,
         )
         if result.returncode != 0:
             raise RuntimeError(f"GPG sign failed: {result.stderr.strip()}")
@@ -73,6 +74,7 @@ def verify(body: str, signature: str, gpg_home: Path | None = None) -> VerifyRes
             env=env,
             capture_output=True,
             text=True,
+            timeout=30,
         )
         if result.returncode == 0:
             key_id = _extract_key_id(result.stderr)
