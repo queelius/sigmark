@@ -10,9 +10,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-def sign(body: str, key: str, gpg_home: Path | None = None) -> str:
+def sign(body: str, key: str | None = None, gpg_home: Path | None = None) -> str:
     """Produce an ASCII-armored detached GPG signature of body text.
 
+    If *key* is ``None``, GPG uses its default key.
     Raises RuntimeError if GPG fails.
     """
     env = _gpg_env(gpg_home)
@@ -21,17 +22,18 @@ def sign(body: str, key: str, gpg_home: Path | None = None) -> str:
         f.flush()
         body_path = f.name
     try:
+        cmd = [
+            "gpg",
+            "--batch",
+            "--yes",
+            "--armor",
+            "--detach-sign",
+        ]
+        if key is not None:
+            cmd.extend(["--local-user", key])
+        cmd.append(body_path)
         result = subprocess.run(
-            [
-                "gpg",
-                "--batch",
-                "--yes",
-                "--armor",
-                "--detach-sign",
-                "--local-user",
-                key,
-                body_path,
-            ],
+            cmd,
             env=env,
             capture_output=True,
             text=True,

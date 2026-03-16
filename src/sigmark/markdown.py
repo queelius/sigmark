@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 
@@ -41,6 +42,28 @@ def render(front_matter: dict, body: str) -> str:
     else:
         fm_str = ""
     return f"---\n{fm_str}---\n{body}"
+
+
+def normalize_body(body: str) -> str:
+    """Normalize body text for reproducible signing.
+
+    Strips trailing whitespace per line, ensures single trailing newline.
+    """
+    if not body or body.isspace():
+        return ""
+    lines = body.rstrip("\n").split("\n")
+    lines = [line.rstrip() for line in lines]
+    return "\n".join(lines) + "\n"
+
+
+def compute_body_hash(body: str) -> str:
+    """Compute SHA-256 hash of normalized body text.
+
+    Returns a prefixed hash string like 'sha256:abc123...'.
+    """
+    normalized = normalize_body(body)
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return f"sha256:{digest}"
 
 
 def resolve_paths(paths: list[Path]) -> list[Path]:

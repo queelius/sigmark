@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import click
@@ -25,7 +27,7 @@ def main(ctx: click.Context, verbose: bool, dry_run: bool) -> None:
 
 
 @main.command()
-@click.option("--key", required=True, help="GPG key ID or email for signing")
+@click.option("--key", default=None, help="GPG key ID or email for signing (uses default key if omitted)")
 @click.option(
     "--gpg-home",
     type=click.Path(exists=True, path_type=Path),  # type: ignore[type-var]
@@ -33,21 +35,49 @@ def main(ctx: click.Context, verbose: bool, dry_run: bool) -> None:
     hidden=True,
     help="Custom GPG home directory (for testing)",
 )
-@click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))  # type: ignore[type-var]
+@click.option("--force", is_flag=True, help="Re-sign files even if signature is current")
+@click.argument("paths", nargs=-1, type=click.Path(exists=True, path_type=Path))  # type: ignore[type-var]
 @click.pass_context
-def sign(ctx: click.Context, key: str, gpg_home: Path | None, paths: tuple[Path, ...]) -> None:
+def sign(
+    ctx: click.Context,
+    key: str | None,
+    gpg_home: Path | None,
+    force: bool,
+    paths: tuple[Path, ...],
+) -> None:
     """Sign markdown files with GPG."""
     dry_run = ctx.obj["dry_run"]
+    if not paths:
+        paths = (Path("."),)
     files = markdown.resolve_paths(list(paths))
+    signed = 0
+    skipped = 0
+    errors = 0
     for md_file in files:
-        fm, body = markdown.parse(md_file.read_text())
-        sig = gpg.sign(body, key=key, gpg_home=gpg_home)
-        fm["signature"] = sig
-        if dry_run:
-            console.print(f"[yellow]Would sign:[/yellow] {md_file}")
-        else:
-            md_file.write_text(markdown.render(fm, body))
-            console.print(f"[green]Signed:[/green] {md_file}")
+        try:
+            fm, body = markdown.parse(md_file.read_text())
+            normalized = markdown.normalize_body(body)
+            current_hash = markdown.compute_body_hash(body)
+
+            # Skip if already signed with current hash, unless --force
+            if not force and "gpg_sig" in fm and fm.get("gpg_body_hash") == current_hash:
+                skipped += 1
+                continue
+
+            sig = gpg.sign(normalized, key=key, gpg_home=gpg_home)
+            fm["gpg_sig"] = sig
+            fm["gpg_sig_date"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            fm["gpg_body_hash"] = current_hash
+            if dry_run:
+                console.print(f"[yellow]Would sign:[/yellow] {md_file}")
+            else:
+                md_file.write_text(markdown.render(fm, body))
+                console.print(f"[green]Signed:[/green] {md_file}")
+            signed += 1
+        except Exception as exc:
+            errors += 1
+            console.print(f"[red]Error:[/red] {md_file}: {exc}")
+    console.print(f"Signed {signed}, skipped {skipped}, errors {errors}")
 
 
 @main.command()
@@ -57,21 +87,24 @@ def sign(ctx: click.Context, key: str, gpg_home: Path | None, paths: tuple[Path,
     default=None,
     hidden=True,
 )
-@click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))  # type: ignore[type-var]
+@click.argument("paths", nargs=-1, type=click.Path(exists=True, path_type=Path))  # type: ignore[type-var]
 @click.pass_context
 def verify(ctx: click.Context, gpg_home: Path | None, paths: tuple[Path, ...]) -> None:
     """Verify GPG signatures on markdown files."""
     verbose = ctx.obj["verbose"]
+    if not paths:
+        paths = (Path("."),)
     files = markdown.resolve_paths(list(paths))
     all_valid = True
     for md_file in files:
         fm, body = markdown.parse(md_file.read_text())
-        sig = fm.get("signature")
+        sig = fm.get("gpg_sig")
         if not sig:
             console.print(f"[red]Unsigned:[/red] {md_file}")
             all_valid = False
             continue
-        result = gpg.verify(body, sig, gpg_home=gpg_home)
+        normalized = markdown.normalize_body(body)
+        result = gpg.verify(normalized, sig, gpg_home=gpg_home)
         if result.valid:
             console.print(f"[green]Valid:[/green] {md_file}")
         else:
@@ -84,17 +117,21 @@ def verify(ctx: click.Context, gpg_home: Path | None, paths: tuple[Path, ...]) -
 
 
 @main.command()
-@click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))  # type: ignore[type-var]
+@click.argument("paths", nargs=-1, type=click.Path(exists=True, path_type=Path))  # type: ignore[type-var]
 @click.pass_context
 def strip(ctx: click.Context, paths: tuple[Path, ...]) -> None:
     """Remove GPG signatures from markdown files."""
     dry_run = ctx.obj["dry_run"]
+    if not paths:
+        paths = (Path("."),)
     files = markdown.resolve_paths(list(paths))
+    sig_fields = ("gpg_sig", "gpg_sig_date", "gpg_body_hash")
     for md_file in files:
         fm, body = markdown.parse(md_file.read_text())
-        if "signature" not in fm:
+        if not any(f in fm for f in sig_fields):
             continue
-        del fm["signature"]
+        for field in sig_fields:
+            fm.pop(field, None)
         if dry_run:
             console.print(f"[yellow]Would strip:[/yellow] {md_file}")
         else:
@@ -109,19 +146,62 @@ def strip(ctx: click.Context, paths: tuple[Path, ...]) -> None:
     default=None,
     hidden=True,
 )
-@click.argument("paths", nargs=-1, required=True, type=click.Path(exists=True, path_type=Path))  # type: ignore[type-var]
+@click.option("--json", "use_json", is_flag=True, help="Output JSON report")
+@click.argument("paths", nargs=-1, type=click.Path(exists=True, path_type=Path))  # type: ignore[type-var]
 @click.pass_context
-def status(ctx: click.Context, gpg_home: Path | None, paths: tuple[Path, ...]) -> None:
+def status(
+    ctx: click.Context,
+    gpg_home: Path | None,
+    use_json: bool,
+    paths: tuple[Path, ...],
+) -> None:
     """Report signing status of markdown files."""
+    if not paths:
+        paths = (Path("."),)
     files = markdown.resolve_paths(list(paths))
+    file_statuses: list[dict] = []
     for md_file in files:
         fm, body = markdown.parse(md_file.read_text())
-        sig = fm.get("signature")
+        sig = fm.get("gpg_sig")
         if not sig:
-            console.print(f"[dim]Unsigned:[/dim] {md_file}")
+            file_statuses.append({"path": str(md_file), "status": "unsigned"})
             continue
-        result = gpg.verify(body, sig, gpg_home=gpg_home)
+
+        # Check for stale hash
+        current_hash = markdown.compute_body_hash(body)
+        stored_hash = fm.get("gpg_body_hash")
+        if stored_hash and stored_hash != current_hash:
+            file_statuses.append({"path": str(md_file), "status": "stale"})
+            continue
+
+        result = gpg.verify(
+            markdown.normalize_body(body), sig, gpg_home=gpg_home
+        )
         if result.valid:
-            console.print(f"[green]Valid:[/green] {md_file}")
+            file_statuses.append({"path": str(md_file), "status": "signed"})
         else:
-            console.print(f"[red]Invalid:[/red] {md_file}")
+            file_statuses.append({"path": str(md_file), "status": "invalid"})
+
+    if use_json:
+        total = len(file_statuses)
+        signed = sum(1 for f in file_statuses if f["status"] == "signed")
+        unsigned = sum(1 for f in file_statuses if f["status"] == "unsigned")
+        stale = sum(1 for f in file_statuses if f["status"] == "stale")
+        report = {
+            "total": total,
+            "signed": signed,
+            "unsigned": unsigned,
+            "stale": stale,
+            "files": file_statuses,
+        }
+        click.echo(json.dumps(report, indent=2))
+    else:
+        status_styles = {
+            "signed": ("[green]Valid:[/green]", "valid"),
+            "unsigned": ("[dim]Unsigned:[/dim]", "unsigned"),
+            "stale": ("[yellow]Stale:[/yellow]", "stale"),
+            "invalid": ("[red]Invalid:[/red]", "invalid"),
+        }
+        for entry in file_statuses:
+            style, _label = status_styles[entry["status"]]
+            console.print(f"{style} {entry['path']}")

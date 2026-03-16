@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from sigmark.markdown import parse, render, resolve_paths
+from sigmark.markdown import compute_body_hash, normalize_body, parse, render, resolve_paths
 
 
 class TestParse:
@@ -34,10 +34,10 @@ class TestParse:
         fm, body = parse(text)
         assert fm["tags"] == ["a", "b"]
 
-    def test_existing_signature_field_preserved(self):
-        text = "---\ntitle: Hello\nsignature: old-sig\n---\nBody.\n"
+    def test_existing_gpg_sig_field_preserved(self):
+        text = "---\ntitle: Hello\ngpg_sig: old-sig\n---\nBody.\n"
         fm, body = parse(text)
-        assert fm["signature"] == "old-sig"
+        assert fm["gpg_sig"] == "old-sig"
         assert body == "Body.\n"
 
 
@@ -62,12 +62,62 @@ class TestRender:
         assert fm == {}
         assert body == "Body.\n"
 
-    def test_render_with_signature(self):
-        fm = {"title": "Hello", "signature": "ABC123"}
+    def test_render_with_gpg_sig(self):
+        fm = {"title": "Hello", "gpg_sig": "ABC123"}
         result = render(fm, "Body.\n")
-        assert "signature:" in result
+        assert "gpg_sig:" in result
         fm2, body2 = parse(result)
-        assert fm2["signature"] == "ABC123"
+        assert fm2["gpg_sig"] == "ABC123"
+
+
+class TestNormalizeBody:
+    def test_strips_trailing_whitespace_per_line(self):
+        result = normalize_body("line one  \nline two\t\n")
+        assert result == "line one\nline two\n"
+
+    def test_ensures_single_trailing_newline(self):
+        result = normalize_body("line one\nline two\n\n\n")
+        assert result == "line one\nline two\n"
+
+    def test_empty_string(self):
+        assert normalize_body("") == ""
+
+    def test_whitespace_only(self):
+        assert normalize_body("   \n  \n") == ""
+
+    def test_idempotent(self):
+        body = "Hello world.\n\nSecond paragraph.\n"
+        first = normalize_body(body)
+        second = normalize_body(first)
+        assert first == second
+
+    def test_no_trailing_newline_adds_one(self):
+        result = normalize_body("no newline at end")
+        assert result == "no newline at end\n"
+
+
+class TestComputeBodyHash:
+    def test_deterministic(self):
+        body = "Hello world.\n"
+        h1 = compute_body_hash(body)
+        h2 = compute_body_hash(body)
+        assert h1 == h2
+
+    def test_sha256_prefix(self):
+        result = compute_body_hash("Hello.\n")
+        assert result.startswith("sha256:")
+        # hex portion should be 64 chars
+        assert len(result.split(":")[1]) == 64
+
+    def test_changes_with_content(self):
+        h1 = compute_body_hash("Content A.\n")
+        h2 = compute_body_hash("Content B.\n")
+        assert h1 != h2
+
+    def test_ignores_trailing_whitespace_differences(self):
+        h1 = compute_body_hash("line one  \nline two\n")
+        h2 = compute_body_hash("line one\nline two\n")
+        assert h1 == h2
 
 
 class TestResolvePaths:

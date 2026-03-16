@@ -22,6 +22,13 @@ class TestSign:
         with pytest.raises(RuntimeError, match="GPG sign failed"):
             sign("Hello.\n", key="nonexistent@example.com", gpg_home=gpg_home)
 
+    def test_default_key_when_none(self, gpg_home):
+        """Signing without specifying a key uses GPG's default key."""
+        sig = sign("Hello default key.\n", key=None, gpg_home=gpg_home)
+        assert "-----BEGIN PGP SIGNATURE-----" in sig
+        result = verify("Hello default key.\n", sig, gpg_home=gpg_home)
+        assert result.valid is True
+
 
 class TestVerify:
     def test_valid_signature(self, gpg_home):
