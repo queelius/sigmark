@@ -1,0 +1,16 @@
+{{/* GPG Signature Badge for sigmark */}}
+{{/* Usage: {{ partial "gpg-badge.html" . }} */}}
+{{ with .Params.gpg_sig }}
+<div class="gpg-badge" style="margin: 1em 0; padding: 0.5em 1em; border: 1px solid #4a9; border-radius: 4px; background: #f0faf5; font-size: 0.85em;">
+  <span style="color: #2a7; font-weight: bold;">&#x1f512; GPG Signed</span>
+  {{ with $.Params.gpg_sig_date }}
+    <span style="color: #666; margin-left: 0.5em;">
+      {{ dateFormat "Jan 2, 2006" (time .) }}
+    </span>
+  {{ end }}
+  <details style="margin-top: 0.5em;">
+    <summary style="cursor: pointer; color: #666;">View signature</summary>
+    <pre style="margin-top: 0.5em; padding: 0.5em; background: #f5f5f5; overflow-x: auto; font-size: 0.8em;"><code>{{ . }}</code></pre>
+  </details>
+</div>
+{{ end }}

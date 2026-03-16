@@ -1,8 +1,6 @@
 # sigmark
 
-GPG signing for static site markdown content.
-
-Sign Hugo/static-site markdown files with GPG, embedding ASCII-armored signatures directly in YAML front matter. Verify authenticity, strip signatures, or check signing status across your content directory.
+GPG signing for static site markdown content. Works with Hugo, Jekyll, Zola, Eleventy, and any static site generator that uses YAML front matter.
 
 ## Install
 
@@ -10,55 +8,87 @@ Sign Hugo/static-site markdown files with GPG, embedding ASCII-armored signature
 pip install sigmark
 ```
 
-Requires GPG (`gpg`) to be installed and available on your `PATH`.
+Requires `gpg` on your PATH.
 
 ## Usage
 
 ```bash
-# Sign all markdown files in a directory
-sigmark sign --key you@example.com content/
+# Sign all markdown in current directory (uses default GPG key)
+sigmark sign
 
-# Sign a single file
-sigmark sign --key you@example.com content/post/hello/index.md
+# Sign a specific directory
+sigmark sign content/
 
-# Verify signatures
+# Use a specific GPG key
+sigmark sign --key lex@metafunctor.com content/
+
+# Re-sign everything (including already-signed)
+sigmark sign --force
+
+# Check signing status (instant, uses body hash)
+sigmark status content/
+sigmark status --json content/
+
+# Verify signatures cryptographically
 sigmark verify content/
 
-# Check signing status
-sigmark status content/
-
-# Remove signatures
+# Remove all signatures
 sigmark strip content/
+
+# Dry run (preview without changes)
+sigmark -n sign content/
 ```
 
-## How It Works
+## What it does
 
-Sigmark signs only the **body** of each markdown file (everything below the closing `---` front-matter delimiter). The GPG signature is stored as a `signature` field in the YAML front matter:
+Signs the **body** of markdown files (everything below the `---` front matter) with GPG and stores the signature in front matter:
 
 ```yaml
----
-title: Hello World
-date: 2026-01-01
-signature: |
+title: "My Post"
+date: 2026-02-17
+tags: ["cryptography"]
+gpg_sig: |
   -----BEGIN PGP SIGNATURE-----
-  iQEzBAABCAAdFiEE...
+  iQIzBAABCAAdFiEE...
   -----END PGP SIGNATURE-----
----
-Your post body here.
+gpg_sig_date: "2026-02-17T14:30:00Z"
+gpg_body_hash: "sha256:a1b2c3d4..."
 ```
 
-This means front-matter changes (tags, categories, draft status) don't invalidate the signature, while any change to the actual content does.
+Only the body is signed. You can freely change tags, categories, and other metadata without invalidating the signature.
+
+### Staleness detection
+
+A SHA-256 body hash is stored at sign time. `sigmark sign` (without `--force`) skips files whose body hasn't changed, making it cheap to run on every deploy. `sigmark status` uses the hash for instant staleness detection without invoking GPG.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `sign --key <id> PATHS...` | Sign markdown files with GPG |
-| `verify PATHS...` | Verify GPG signatures (exit 1 on failure) |
-| `strip PATHS...` | Remove signature fields from front matter |
-| `status PATHS...` | Report unsigned / valid / invalid per file |
+| `sign [PATHS...]` | Sign markdown files (default key, or `--key ID`) |
+| `verify [PATHS...]` | Cryptographic verification (exit 1 on failure) |
+| `status [PATHS...]` | Signing coverage report (`--json` for machine output) |
+| `strip [PATHS...]` | Remove all signature fields from front matter |
 
-All commands accept files and/or directories. Directories are walked recursively for `.md` files with YAML front matter. Global flags: `--verbose`, `--dry-run`.
+All commands default to current directory. Directories are walked recursively for `.md` files with YAML front matter. Global flags: `-v` (verbose), `-n` (dry-run).
+
+## Hugo integration
+
+Copy `hugo/layouts/partials/gpg-badge.html` into your site's `layouts/partials/`, then:
+
+```html
+{{ partial "gpg-badge.html" . }}
+```
+
+Renders a "GPG Signed" badge with expandable signature details.
+
+## Manual verification
+
+```bash
+# Extract body (everything after second ---) to body.txt
+# Copy gpg_sig value to sig.asc
+gpg --verify sig.asc body.txt
+```
 
 ## License
 
