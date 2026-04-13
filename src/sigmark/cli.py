@@ -14,6 +14,20 @@ from sigmark import __version__, gpg, markdown
 
 console = Console(stderr=True)
 
+SIG_FIELDS = ("gpg_sig", "gpg_sig_date", "gpg_body_hash")
+
+gpg_home_option = click.option(
+    "--gpg-home",
+    type=click.Path(exists=True, path_type=Path),  # type: ignore[type-var]
+    default=None,
+    hidden=True,
+    help="Custom GPG home directory (for testing)",
+)
+
+
+def _load_files(paths: tuple[Path, ...]) -> list[Path]:
+    return markdown.load_files(list(paths or (Path("."),)))
+
 
 @click.group()
 @click.version_option(version=__version__, prog_name="sigmark")
@@ -29,13 +43,7 @@ def main(ctx: click.Context, verbose: bool, dry_run: bool) -> None:
 
 @main.command()
 @click.option("--key", default=None, help="GPG key ID or email for signing (uses default key if omitted)")
-@click.option(
-    "--gpg-home",
-    type=click.Path(exists=True, path_type=Path),  # type: ignore[type-var]
-    default=None,
-    hidden=True,
-    help="Custom GPG home directory (for testing)",
-)
+@gpg_home_option
 @click.option("--force", is_flag=True, help="Re-sign files even if signature is current")
 @click.argument("paths", nargs=-1, type=click.Path(exists=True, path_type=Path))  # type: ignore[type-var]
 @click.pass_context
@@ -48,18 +56,14 @@ def sign(
 ) -> None:
     """Sign markdown files with GPG."""
     dry_run = ctx.obj["dry_run"]
-    if not paths:
-        paths = (Path("."),)
-    files = markdown.resolve_paths(list(paths))
     signed = 0
     skipped = 0
     errors = 0
-    for md_file in files:
+    for md_file in _load_files(paths):
         try:
             fm, body = markdown.parse(md_file.read_text(encoding="utf-8"))
             current_hash = markdown.compute_body_hash(body)
 
-            # Skip if already signed with current hash, unless --force
             if not force and "gpg_sig" in fm and fm.get("gpg_body_hash") == current_hash:
                 skipped += 1
                 continue
@@ -85,20 +89,13 @@ def sign(
 
 
 @main.command()
-@click.option(
-    "--gpg-home",
-    type=click.Path(exists=True, path_type=Path),  # type: ignore[type-var]
-    default=None,
-    hidden=True,
-)
+@gpg_home_option
 @click.argument("paths", nargs=-1, type=click.Path(exists=True, path_type=Path))  # type: ignore[type-var]
 @click.pass_context
 def verify(ctx: click.Context, gpg_home: Path | None, paths: tuple[Path, ...]) -> None:
     """Verify GPG signatures on markdown files."""
     verbose = ctx.obj["verbose"]
-    if not paths:
-        paths = (Path("."),)
-    files = markdown.resolve_paths(list(paths))
+    files = _load_files(paths)
     if not files:
         console.print("[red]No markdown files found[/red]")
         raise SystemExit(1)
@@ -132,49 +129,48 @@ def verify(ctx: click.Context, gpg_home: Path | None, paths: tuple[Path, ...]) -
 def strip(ctx: click.Context, paths: tuple[Path, ...]) -> None:
     """Remove GPG signatures from markdown files."""
     dry_run = ctx.obj["dry_run"]
-    if not paths:
-        paths = (Path("."),)
-    files = markdown.resolve_paths(list(paths))
-    sig_fields = ("gpg_sig", "gpg_sig_date", "gpg_body_hash")
-    for md_file in files:
-        fm, body = markdown.parse(md_file.read_text(encoding="utf-8"))
-        if not any(f in fm for f in sig_fields):
-            continue
-        for field in sig_fields:
-            fm.pop(field, None)
-        if dry_run:
-            console.print(f"[yellow]Would strip:[/yellow] {md_file}")
-        else:
-            md_file.write_text(markdown.render(fm, body), encoding="utf-8")
-            console.print(f"[green]Stripped:[/green] {md_file}")
+    for md_file in _load_files(paths):
+        try:
+            fm, body = markdown.parse(md_file.read_text(encoding="utf-8"))
+            if not any(f in fm for f in SIG_FIELDS):
+                continue
+            for field in SIG_FIELDS:
+                fm.pop(field, None)
+            if dry_run:
+                console.print(f"[yellow]Would strip:[/yellow] {md_file}")
+            else:
+                md_file.write_text(markdown.render(fm, body), encoding="utf-8")
+                console.print(f"[green]Stripped:[/green] {md_file}")
+        except Exception as exc:
+            console.print(f"[red]Error:[/red] {md_file}: {exc}")
 
 
-def _classify_file(md_file: Path, gpg_home: Path | None) -> str:
-    """Determine the signing status of a single markdown file.
-
-    Returns one of: "unsigned", "stale", "signed", "invalid".
-    """
+def _classify(md_file: Path, gpg_home: Path | None) -> str:
+    """Return one of "unsigned", "stale", "signed", "invalid"."""
     fm, body = markdown.parse(md_file.read_text(encoding="utf-8"))
     sig = fm.get("gpg_sig")
     if not sig:
         return "unsigned"
 
-    current_hash = markdown.compute_body_hash(body)
     stored_hash = fm.get("gpg_body_hash")
-    if stored_hash and stored_hash != current_hash:
+    if stored_hash and stored_hash != markdown.compute_body_hash(body):
         return "stale"
 
     result = gpg.verify(markdown.normalize_body(body), sig, gpg_home=gpg_home)
     return "signed" if result.valid else "invalid"
 
 
+_STATUS_STYLES = {
+    "signed": "[green]Valid:[/green]",
+    "unsigned": "[dim]Unsigned:[/dim]",
+    "stale": "[yellow]Stale:[/yellow]",
+    "invalid": "[red]Invalid:[/red]",
+    "error": "[red]Error:[/red]",
+}
+
+
 @main.command()
-@click.option(
-    "--gpg-home",
-    type=click.Path(exists=True, path_type=Path),  # type: ignore[type-var]
-    default=None,
-    hidden=True,
-)
+@gpg_home_option
 @click.option("--json", "use_json", is_flag=True, help="Output JSON report")
 @click.argument("paths", nargs=-1, type=click.Path(exists=True, path_type=Path))  # type: ignore[type-var]
 @click.pass_context
@@ -185,13 +181,10 @@ def status(
     paths: tuple[Path, ...],
 ) -> None:
     """Report signing status of markdown files."""
-    if not paths:
-        paths = (Path("."),)
-    files = markdown.resolve_paths(list(paths))
     file_statuses: list[dict] = []
-    for md_file in files:
+    for md_file in _load_files(paths):
         try:
-            file_status = _classify_file(md_file, gpg_home)
+            file_status = _classify(md_file, gpg_home)
         except Exception as exc:
             console.print(f"[red]Error:[/red] {md_file}: {exc}")
             file_status = "error"
@@ -199,23 +192,10 @@ def status(
 
     if use_json:
         counts = Counter(f["status"] for f in file_statuses)
-        report = {
-            "total": len(file_statuses),
-            "signed": counts.get("signed", 0),
-            "unsigned": counts.get("unsigned", 0),
-            "stale": counts.get("stale", 0),
-            "invalid": counts.get("invalid", 0),
-            "files": file_statuses,
-        }
+        report: dict = {"total": len(file_statuses)}
+        report.update({name: counts.get(name, 0) for name in _STATUS_STYLES})
+        report["files"] = file_statuses
         click.echo(json.dumps(report, indent=2))
     else:
-        status_styles = {
-            "signed": "[green]Valid:[/green]",
-            "unsigned": "[dim]Unsigned:[/dim]",
-            "stale": "[yellow]Stale:[/yellow]",
-            "invalid": "[red]Invalid:[/red]",
-            "error": "[red]Error:[/red]",
-        }
         for entry in file_statuses:
-            style = status_styles[entry["status"]]
-            console.print(f"{style} {entry['path']}")
+            console.print(f"{_STATUS_STYLES[entry['status']]} {entry['path']}")

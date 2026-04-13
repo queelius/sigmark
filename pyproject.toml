@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "sigmark"
-version = "0.2.0"
+version = "0.3.0"
 description = "GPG signing for static site markdown content"
 readme = "README.md"
 license = "MIT"

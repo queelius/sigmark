@@ -442,3 +442,43 @@ class TestSignAllErrors:
             ["sign", "--key", "nonexistent-key@nowhere.invalid", str(md_file)],
         )
         assert result.exit_code == 1
+
+
+class TestStatusJsonErrorCount:
+    def test_status_json_reports_errors(self, tmp_path, gpg_home):
+        """A file with malformed YAML produces an 'error' entry in --json output."""
+        good = tmp_path / "good.md"
+        good.write_text("---\ntitle: Good\n---\nOK.\n")
+        bad = tmp_path / "bad.md"
+        bad.write_text("---\ntitle: [unterminated\n  bad: indent\n---\nBody.\n")
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["status", "--json", "--gpg-home", str(gpg_home), str(tmp_path)],
+        )
+        assert result.exit_code == 0
+        # result.output mixes stderr (Rich error line) and stdout (JSON); slice from `{`
+        data = json.loads(result.output[result.output.index("{") :])
+        assert data["error"] >= 1
+        assert data["total"] == (
+            data["signed"] + data["unsigned"] + data["stale"] + data["invalid"] + data["error"]
+        )
+
+
+class TestStripErrorHandling:
+    def test_strip_continues_past_errored_file(self, tmp_path):
+        """One unreadable file shouldn't abort a strip batch."""
+        good = tmp_path / "good.md"
+        fm_sig = (
+            "---\ntitle: Good\ngpg_sig: fake\ngpg_sig_date: x\ngpg_body_hash: y\n"
+            "---\nBody.\n"
+        )
+        good.write_text(fm_sig)
+        bad = tmp_path / "bad.md"
+        bad.write_text("---\ntitle: [unterminated\n---\nBody.\n")
+        runner = CliRunner()
+        result = runner.invoke(main, ["strip", str(tmp_path)])
+        assert result.exit_code == 0
+        # Good file should still be stripped even though bad file errored
+        fm2, _ = parse(good.read_text())
+        assert "gpg_sig" not in fm2

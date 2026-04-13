@@ -11,23 +11,25 @@ from ruamel.yaml import YAML
 
 _yaml = YAML()
 _yaml.preserve_quotes = True
-_yaml.width = 4096  # Prevent line wrapping of long scalar values
+_yaml.width = 4096  # avoid wrapping long scalars (PGP signatures); see KNOWN_ISSUES.md
 _yaml.indent(mapping=2, sequence=4, offset=2)
 
-# Remove the implicit timestamp resolver so dates stay as plain strings,
-# preventing round-trip corruption (e.g. 2026-01-01 -> '2026-01-01').
+# Strip the implicit timestamp resolver so date scalars stay as `str`, not
+# `datetime.date`. ruamel.yaml stores resolvers in two private structures that
+# both feed the parser: `_version_implicit_resolver` (per-spec-version) drives
+# scalar typing, and `versioned_resolver` (first-char dispatch) is consulted
+# at parse time. Both must be cleaned or dates re-acquire the timestamp tag.
 _TIMESTAMP_TAG = "tag:yaml.org,2002:timestamp"
-for _version, _resolvers in _yaml.resolver._version_implicit_resolver.items():
-    for _key in list(_resolvers):
-        _resolvers[_key] = [
-            (tag, regexp) for tag, regexp in _resolvers[_key] if tag != _TIMESTAMP_TAG
-        ]
-for _key in list(_yaml.resolver.versioned_resolver):
-    _yaml.resolver.versioned_resolver[_key] = [
-        (tag, regexp)
-        for tag, regexp in _yaml.resolver.versioned_resolver[_key]
-        if tag != _TIMESTAMP_TAG
-    ]
+
+
+def _strip_timestamp(table: dict) -> None:
+    for key in list(table):
+        table[key] = [(t, rx) for t, rx in table[key] if t != _TIMESTAMP_TAG]
+
+
+for _resolvers in _yaml.resolver._version_implicit_resolver.values():
+    _strip_timestamp(_resolvers)
+_strip_timestamp(_yaml.resolver.versioned_resolver)
 
 
 def parse(text: str) -> tuple[dict, str]:
@@ -79,25 +81,27 @@ def compute_body_hash(body: str) -> str:
     return f"sha256:{digest}"
 
 
-def resolve_paths(paths: list[Path]) -> list[Path]:
-    """Expand files and directories into a list of .md files with front matter.
+def load_files(paths: list[Path]) -> list[Path]:
+    """Expand files and directories into a flat list of .md file paths.
 
-    Directories are walked recursively. Individual files are validated
-    to have front matter. Raises FileNotFoundError for missing paths
-    and ValueError for files without front matter.
+    Explicit file arguments are returned as-is (callers validate).
+    Directories are walked recursively; only files with an opening
+    ``---\\n`` (likely YAML front matter) are included, others skipped.
+    Raises FileNotFoundError for missing paths.
     """
     result: list[Path] = []
     for path in paths:
         if not path.exists():
             raise FileNotFoundError(f"Path not found: {path}")
         if path.is_file():
-            parse(path.read_text(encoding="utf-8"))
             result.append(path)
         elif path.is_dir():
             for md_file in sorted(path.rglob("*.md")):
+                # Cheap header sniff; full parse happens in callers' try/except.
                 try:
-                    parse(md_file.read_text(encoding="utf-8"))
-                    result.append(md_file)
-                except ValueError:
+                    with md_file.open("rb") as f:
+                        if f.readline().rstrip(b"\r\n") == b"---":
+                            result.append(md_file)
+                except OSError:
                     continue
     return result

@@ -6,8 +6,24 @@ import os
 import re
 import subprocess
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+
+
+@contextmanager
+def _temp_text(content: str, suffix: str) -> Iterator[str]:
+    """Write ``content`` to a tempfile (UTF-8), yield its path, always unlink it."""
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=suffix, delete=False, encoding="utf-8"
+    ) as f:
+        f.write(content)
+        path = f.name
+    try:
+        yield path
+    finally:
+        Path(path).unlink(missing_ok=True)
 
 
 def sign(body: str, key: str | None = None, gpg_home: Path | None = None) -> str:
@@ -17,34 +33,21 @@ def sign(body: str, key: str | None = None, gpg_home: Path | None = None) -> str
     Raises RuntimeError if GPG fails.
     """
     env = _gpg_env(gpg_home)
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
-        f.write(body)
-        body_path = f.name
-    try:
-        cmd = [
-            "gpg",
-            "--batch",
-            "--yes",
-            "--armor",
-            "--detach-sign",
-        ]
-        if key is not None:
-            cmd.extend(["--local-user", key])
-        cmd.append(body_path)
-        result = subprocess.run(
-            cmd,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(f"GPG sign failed: {result.stderr.strip()}")
+    with _temp_text(body, ".txt") as body_path:
         sig_path = Path(body_path + ".asc")
-        return sig_path.read_text(encoding="utf-8")
-    finally:
-        Path(body_path).unlink(missing_ok=True)
-        Path(body_path + ".asc").unlink(missing_ok=True)
+        try:
+            cmd = ["gpg", "--batch", "--yes", "--armor", "--detach-sign"]
+            if key is not None:
+                cmd.extend(["--local-user", key])
+            cmd.append(body_path)
+            result = subprocess.run(
+                cmd, env=env, capture_output=True, text=True, timeout=30
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"GPG sign failed: {result.stderr.strip()}")
+            return sig_path.read_text(encoding="utf-8")
+        finally:
+            sig_path.unlink(missing_ok=True)
 
 
 @dataclass
@@ -59,13 +62,7 @@ class VerifyResult:
 def verify(body: str, signature: str, gpg_home: Path | None = None) -> VerifyResult:
     """Verify a detached GPG signature against body text."""
     env = _gpg_env(gpg_home)
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as bf:
-        bf.write(body)
-        body_path = bf.name
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".sig", delete=False, encoding="utf-8") as sf:
-        sf.write(signature)
-        sig_path = sf.name
-    try:
+    with _temp_text(body, ".txt") as body_path, _temp_text(signature, ".sig") as sig_path:
         result = subprocess.run(
             ["gpg", "--batch", "--verify", sig_path, body_path],
             env=env,
@@ -74,12 +71,8 @@ def verify(body: str, signature: str, gpg_home: Path | None = None) -> VerifyRes
             timeout=30,
         )
         if result.returncode == 0:
-            key_id = _extract_key_id(result.stderr)
-            return VerifyResult(valid=True, key_id=key_id)
+            return VerifyResult(valid=True, key_id=_extract_key_id(result.stderr))
         return VerifyResult(valid=False, error=result.stderr.strip())
-    finally:
-        Path(body_path).unlink(missing_ok=True)
-        Path(sig_path).unlink(missing_ok=True)
 
 
 def _extract_key_id(stderr: str) -> str | None:

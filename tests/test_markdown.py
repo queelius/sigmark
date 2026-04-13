@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from sigmark.markdown import compute_body_hash, normalize_body, parse, render, resolve_paths
+from sigmark.markdown import compute_body_hash, load_files, normalize_body, parse, render
 
 
 class TestParse:
@@ -39,6 +39,12 @@ class TestParse:
         fm, body = parse(text)
         assert fm["gpg_sig"] == "old-sig"
         assert body == "Body.\n"
+
+    def test_crlf_input_normalized(self):
+        """Windows-authored files (CRLF) parse identically to LF."""
+        lf = "---\ntitle: Hello\n---\nBody text.\n"
+        crlf = lf.replace("\n", "\r\n")
+        assert parse(crlf) == parse(lf)
 
 
 class TestRender:
@@ -127,28 +133,37 @@ class TestComputeBodyHash:
         assert h1 == h2
 
 
-class TestResolvePaths:
+class TestLoadFiles:
     def test_directory_finds_md_with_front_matter(self, tmp_content):
-        paths = resolve_paths([tmp_content])
-        filenames = {p.name for p in paths}
+        files = load_files([tmp_content])
+        filenames = {p.name for p in files}
         assert "index.md" in filenames
         # README.md has no front matter, should be excluded
-        assert all("README" not in str(p) for p in paths)
+        assert all("README" not in str(p) for p in files)
 
     def test_single_file(self, tmp_content):
         md_file = tmp_content / "post" / "hello-world" / "index.md"
-        paths = resolve_paths([md_file])
-        assert paths == [md_file]
+        assert load_files([md_file]) == [md_file]
 
     def test_mixed_files_and_dirs(self, tmp_content):
         single = tmp_content / "post" / "hello-world" / "index.md"
-        paths = resolve_paths([single, tmp_content / "post" / "second-post"])
-        assert len(paths) == 2
+        files = load_files([single, tmp_content / "post" / "second-post"])
+        assert len(files) == 2
 
     def test_nonexistent_path_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError):
-            resolve_paths([tmp_path / "nope.md"])
+            load_files([tmp_path / "nope.md"])
 
-    def test_file_without_front_matter_raises(self, tmp_content):
-        with pytest.raises(ValueError, match="No YAML front matter"):
-            resolve_paths([tmp_content / "README.md"])
+    def test_explicit_file_without_front_matter_included(self, tmp_content):
+        """Explicit file args are returned as-is; callers validate front matter."""
+        assert load_files([tmp_content / "README.md"]) == [tmp_content / "README.md"]
+
+    def test_directory_skips_md_files_without_front_matter(self, tmp_content):
+        """README.md is in tmp_content root but lacks front matter; directory walk skips it."""
+        files = load_files([tmp_content])
+        assert tmp_content / "README.md" not in files
+
+    def test_directory_walk_accepts_crlf_header(self, tmp_path):
+        """Windows-authored markdown (CRLF line endings) is recognized."""
+        (tmp_path / "crlf.md").write_bytes(b"---\r\ntitle: CRLF\r\n---\r\nBody.\r\n")
+        assert tmp_path / "crlf.md" in load_files([tmp_path])
