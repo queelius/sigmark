@@ -12,7 +12,7 @@ from rich.console import Console
 
 from sigmark import __version__, gpg, markdown
 
-console = Console(stderr=True)
+console = Console(stderr=True, soft_wrap=True)
 
 SIG_FIELDS = ("gpg_sig", "gpg_sig_date", "gpg_body_hash")
 

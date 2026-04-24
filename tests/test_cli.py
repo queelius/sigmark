@@ -465,6 +465,28 @@ class TestStatusJsonErrorCount:
         )
 
 
+class TestLongPathNotWrapped:
+    def test_dry_run_does_not_wrap_long_paths(self, tmp_path):
+        """Rich console must not wrap long file paths when output is redirected.
+
+        CliRunner captures stdout/stderr as StringIO (non-TTY), which triggers
+        rich's default 80-col wrapping. soft_wrap=True suppresses this so
+        downstream tools (grep, awk, jq) see whole paths on one line.
+        """
+        deep = tmp_path / "a" / "very" / "deeply" / "nested" / "directory" / "structure"
+        deep.mkdir(parents=True)
+        md = deep / "a-file-with-a-fairly-long-name-exceeding-eighty-characters.md"
+        md.write_text("---\ntitle: Deep\n---\nBody.\n")
+        assert len(str(md)) > 80, "test path is not actually long enough"
+        runner = CliRunner()
+        result = runner.invoke(main, ["-n", "sign", str(md)])
+        assert result.exit_code == 0
+        assert any(
+            "Would sign:" in line and str(md) in line
+            for line in result.output.splitlines()
+        ), f"Long path was wrapped in output:\n{result.output}"
+
+
 class TestStripErrorHandling:
     def test_strip_continues_past_errored_file(self, tmp_path):
         """One unreadable file shouldn't abort a strip batch."""
