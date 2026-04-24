@@ -94,6 +94,37 @@ Because signing is idempotent and hash-skipped, you can safely put `sigmark sign
 sigmark sign --force content/   # re-sign everything, ignoring cached hash
 ```
 
+## Publishing your pubkey
+
+A signature is only as trustworthy as the path a reader uses to get your public key. Sigmark ships a `wkd` subcommand that generates a Web Key Directory so readers can discover your key directly from your domain:
+
+```bash
+# Generate WKD files (auto-detects your email from your secret key)
+sigmark wkd path/to/hugo/static/
+
+# The command writes:
+#   path/to/hugo/static/.well-known/openpgpkey/policy
+#   path/to/hugo/static/.well-known/openpgpkey/hu/<zbase32-hash>
+```
+
+Deploy that directory to your site root; the pubkey is now reachable at `https://<your-domain>/.well-known/openpgpkey/hu/<hash>`. Any GPG client can find it:
+
+```bash
+gpg --auto-key-locate wkd --locate-keys you@your-domain.com
+# Imports your key directly from your own site, over HTTPS, no keyserver needed.
+```
+
+This closes the trust loop: readers arrive at your site via DNS+TLS (trusting the domain), and the key used to verify your content is served from that same trusted origin. No third-party keyserver, no Keybase-style identity broker, no out-of-band key exchange.
+
+Most static hosts need one small config tweak: serve the pubkey file with `Content-Type: application/octet-stream`. For Netlify, add to `netlify.toml`:
+
+```toml
+[[headers]]
+  for = "/.well-known/openpgpkey/hu/*"
+  [headers.values]
+    Content-Type = "application/octet-stream"
+```
+
 ## Commands
 
 | Command | Description |
@@ -102,6 +133,7 @@ sigmark sign --force content/   # re-sign everything, ignoring cached hash
 | `verify [PATHS...]` | Cryptographic verification. Exits 1 on any failure, unsigned, or missing file. |
 | `status [PATHS...]` | Signing coverage report. Classifies each file as signed / unsigned / stale / invalid / error. Use `--json` for machine-readable output. |
 | `strip [PATHS...]` | Remove all `gpg_*` signature fields from front matter (useful before re-signing or publishing unsigned drafts). |
+| `wkd <OUTPUT_DIR>` | Generate Web Key Directory files for publishing your pubkey. Drop `OUTPUT_DIR` into your static site's web root to make your key discoverable via `gpg --locate-keys`. |
 
 All commands default to the current directory. Directories are walked recursively for `.md` files with YAML front matter.
 

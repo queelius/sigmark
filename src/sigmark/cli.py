@@ -11,6 +11,7 @@ import click
 from rich.console import Console
 
 from sigmark import __version__, gpg, markdown
+from sigmark import wkd as wkd_mod
 
 console = Console(stderr=True, soft_wrap=True)
 
@@ -158,6 +159,71 @@ def _classify(md_file: Path, gpg_home: Path | None) -> str:
 
     result = gpg.verify(markdown.normalize_body(body), sig, gpg_home=gpg_home)
     return "signed" if result.valid else "invalid"
+
+
+@main.command()
+@click.argument("output_dir", type=click.Path(path_type=Path))  # type: ignore[type-var]
+@click.option(
+    "--email",
+    default=None,
+    help="Email to publish (local-part feeds the WKD hash). "
+    "Defaults to the primary email UID of your secret key.",
+)
+@click.option(
+    "--key",
+    default=None,
+    help="GPG key selector (fingerprint, key ID, email, UID). "
+    "Required only if you have multiple secret keys.",
+)
+@gpg_home_option
+def wkd(
+    output_dir: Path,
+    email: str | None,
+    key: str | None,
+    gpg_home: Path | None,
+) -> None:
+    """Generate Web Key Directory (WKD) files for publishing your GPG pubkey.
+
+    Writes ``OUTPUT_DIR/.well-known/openpgpkey/`` containing your binary pubkey
+    at the path that ``gpg --locate-keys <email>`` expects. Copy OUTPUT_DIR
+    into your static site's web root (e.g. Hugo's ``static/``) and deploy.
+    Readers can then discover your key directly from your domain.
+    """
+    try:
+        if email is None:
+            email = wkd_mod.find_default_email(selector=key, gpg_home=gpg_home)
+        selector = key if key is not None else email
+        pubkey_binary = wkd_mod.export_pubkey(selector, gpg_home=gpg_home)
+    except Exception as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        raise SystemExit(1) from exc
+
+    local_part, domain = email.split("@", 1)
+    wkd_dir = output_dir / ".well-known" / "openpgpkey"
+    hu_dir = wkd_dir / "hu"
+    hu_dir.mkdir(parents=True, exist_ok=True)
+    policy_path = wkd_dir / "policy"
+    pubkey_path = hu_dir / wkd_mod.wkd_hash(local_part)
+
+    policy_path.write_bytes(b"")
+    pubkey_path.write_bytes(pubkey_binary)
+
+    console.print(f"[green]WKD files written for[/green] {email}")
+    console.print(f"  [dim]{policy_path}[/dim]  (empty, default policy)")
+    console.print(f"  [dim]{pubkey_path}[/dim]  ({len(pubkey_binary)} bytes)")
+    console.print("")
+    console.print("[bold]Next steps:[/bold]")
+    console.print(
+        f"  1. Deploy [cyan]{output_dir}[/cyan] to your site root so the files "
+        f"are reachable at [cyan]https://{domain}/.well-known/openpgpkey/...[/cyan]"
+    )
+    console.print(
+        "  2. Ensure the server sends the pubkey file with "
+        "Content-Type: application/octet-stream."
+    )
+    console.print(
+        f"  3. Verify: [cyan]gpg --auto-key-locate wkd --locate-keys {email}[/cyan]"
+    )
 
 
 _STATUS_STYLES = {

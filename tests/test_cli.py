@@ -465,6 +465,41 @@ class TestStatusJsonErrorCount:
         )
 
 
+class TestWkdCommand:
+    def test_writes_well_known_structure(self, tmp_path, gpg_home):
+        """`sigmark wkd <dir>` populates .well-known/openpgpkey/ correctly."""
+        out = tmp_path / "static"
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "wkd",
+                "--email",
+                "test@example.com",
+                "--gpg-home",
+                str(gpg_home),
+                str(out),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        wkd_dir = out / ".well-known" / "openpgpkey"
+        assert (wkd_dir / "policy").is_file()
+        hu_files = list((wkd_dir / "hu").iterdir())
+        assert len(hu_files) == 1
+        assert hu_files[0].stat().st_size > 100  # pubkey is non-empty
+
+    def test_missing_key_exits_nonzero(self, tmp_path):
+        """No secret keys in the gnupg home → clean error, exit 1."""
+        empty_home = tmp_path / "empty-gnupg"
+        empty_home.mkdir(mode=0o700)
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["wkd", "--gpg-home", str(empty_home), str(tmp_path / "out")],
+        )
+        assert result.exit_code == 1
+
+
 class TestLongPathNotWrapped:
     def test_dry_run_does_not_wrap_long_paths(self, tmp_path):
         """Rich console must not wrap long file paths when output is redirected.
